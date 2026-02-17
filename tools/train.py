@@ -41,8 +41,8 @@ def parse_args():
         help='whether to set deterministic options for CUDNN backend.')
     parser.add_argument(
         '--launcher',
-        choices=['pytorch', 'slurm'],
-        default='pytorch',
+        choices=['none', 'pytorch', 'slurm'],
+        default='none',
         help='job launcher')
     parser.add_argument(
         '--compile',
@@ -75,9 +75,14 @@ def main():
     if not hasattr(cfg, 'dist_params'):
         cfg.dist_params = dict(backend='nccl')
 
-    init_dist(args.launcher, **cfg.dist_params)
-    rank, world_size = get_dist_info()
-    cfg.gpu_ids = range(world_size)
+    distributed = args.launcher != 'none'
+    if distributed:
+        init_dist(args.launcher, **cfg.dist_params)
+        rank, world_size = get_dist_info()
+        cfg.gpu_ids = range(world_size)
+    else:
+        rank, world_size = 0, 1
+        cfg.gpu_ids = [0]
 
     auto_resume = cfg.get('auto_resume', True)
     if auto_resume and cfg.get('resume_from', None) is None:
@@ -151,10 +156,13 @@ def main():
             retry -= 1
         assert retry >= 0, 'Failed to launch memcached. '
 
-    dist.barrier()
+    if distributed:
+        dist.barrier()
 
-    train_model(model, datasets, cfg, validate=args.validate, test=test_option, timestamp=timestamp, meta=meta)
-    dist.barrier()
+    train_model(model, datasets, cfg, distributed=distributed, validate=args.validate, test=test_option, timestamp=timestamp, meta=meta)
+
+    if distributed:
+        dist.barrier()
 
     if rank == 0 and memcached:
         mc_off()

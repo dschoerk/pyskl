@@ -41,6 +41,7 @@ def build_dataset(cfg, default_args=None):
 def build_dataloader(dataset,
                      videos_per_gpu,
                      workers_per_gpu,
+                     dist=True,
                      shuffle=True,
                      seed=None,
                      drop_last=False,
@@ -57,6 +58,7 @@ def build_dataloader(dataset,
             batch size of each GPU.
         workers_per_gpu (int): How many subprocesses to use for data
             loading for each GPU.
+        dist (bool): Whether to use distributed sampler. Default: True.
         shuffle (bool): Whether to shuffle the data at every epoch.
             Default: True.
         seed (int | None): Seed to be used. Default: None.
@@ -77,18 +79,20 @@ def build_dataloader(dataset,
     """
     rank, world_size = get_dist_info()
 
-    if hasattr(dataset, 'class_prob') and dataset.class_prob is not None:
-        sampler = ClassSpecificDistributedSampler(
-            dataset,
-            world_size,
-            rank,
-            class_prob=dataset.class_prob,
-            shuffle=shuffle,
-            seed=seed)
-    else:
-        sampler = DistributedSampler(
-            dataset, world_size, rank, shuffle=shuffle, seed=seed)
-    shuffle = False
+    sampler = None
+    if dist:
+        if hasattr(dataset, 'class_prob') and dataset.class_prob is not None:
+            sampler = ClassSpecificDistributedSampler(
+                dataset,
+                world_size,
+                rank,
+                class_prob=dataset.class_prob,
+                shuffle=shuffle,
+                seed=seed)
+        else:
+            sampler = DistributedSampler(
+                dataset, world_size, rank, shuffle=shuffle, seed=seed)
+        shuffle = False
     batch_size = videos_per_gpu
     num_workers = workers_per_gpu
 

@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import numpy as np
 from mmcv.runner import DistEvalHook as BasicDistEvalHook
+from mmcv.runner.hooks.evaluation import EvalHook
 
 
 class DistEvalHook(BasicDistEvalHook):

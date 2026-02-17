@@ -5,11 +5,11 @@ import os.path as osp
 import time
 import torch
 import torch.distributed as dist
-from mmcv.engine import multi_gpu_test
-from mmcv.parallel import MMDistributedDataParallel
+from mmcv.engine import multi_gpu_test, single_gpu_test
+from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import DistSamplerSeedHook, EpochBasedRunner, OptimizerHook, build_optimizer, get_dist_info
 
-from ..core import DistEvalHook
+from ..core import DistEvalHook, EvalHook
 from ..datasets import build_dataloader, build_dataset
 from ..utils import cache_checkpoint, get_root_logger
 
@@ -50,6 +50,7 @@ def init_random_seed(seed=None, device='cuda'):
 def train_model(model,
                 dataset,
                 cfg,
+                distributed=True,
                 validate=False,
                 test=dict(test_best=False, test_last=False),
                 timestamp=None,
@@ -60,6 +61,8 @@ def train_model(model,
         model (nn.Module): The model to be trained.
         dataset (:obj:`Dataset`): Train dataset.
         cfg (dict): The config dict for training.
+        distributed (bool): Whether to use distributed training.
+            Default: True.
         validate (bool): Whether to do evaluation. Default: False.
         test (dict): The testing option, with two keys: test_last & test_best.
             The value is True or False, indicating whether to test the
@@ -82,19 +85,23 @@ def train_model(model,
     dataloader_setting = dict(dataloader_setting,
                               **cfg.data.get('train_dataloader', {}))
 
+    if not distributed:
+        dataloader_setting['dist'] = False
+
     data_loaders = [
         build_dataloader(ds, **dataloader_setting) for ds in dataset
     ]
 
     # put model on gpus
-    find_unused_parameters = cfg.get('find_unused_parameters', True)
-    # Sets the `find_unused_parameters` parameter in
-    # torch.nn.parallel.DistributedDataParallel
-    model = MMDistributedDataParallel(
-        model.cuda(),
-        device_ids=[torch.cuda.current_device()],
-        broadcast_buffers=False,
-        find_unused_parameters=find_unused_parameters)
+    if distributed:
+        find_unused_parameters = cfg.get('find_unused_parameters', True)
+        model = MMDistributedDataParallel(
+            model.cuda(),
+            device_ids=[torch.cuda.current_device()],
+            broadcast_buffers=False,
+            find_unused_parameters=find_unused_parameters)
+    else:
+        model = MMDataParallel(model.cuda(), device_ids=cfg.gpu_ids)
 
     # build runner
     optimizer = build_optimizer(model, cfg.optimizer)
@@ -118,7 +125,8 @@ def train_model(model,
     runner.register_training_hooks(cfg.lr_config, optimizer_config,
                                    cfg.checkpoint_config, cfg.log_config,
                                    cfg.get('momentum_config', None))
-    runner.register_hook(DistSamplerSeedHook())
+    if distributed:
+        runner.register_hook(DistSamplerSeedHook())
 
     eval_hook = None
     if validate:
@@ -131,8 +139,10 @@ def train_model(model,
             shuffle=False)
         dataloader_setting = dict(dataloader_setting,
                                   **cfg.data.get('val_dataloader', {}))
+        if not distributed:
+            dataloader_setting['dist'] = False
         val_dataloader = build_dataloader(val_dataset, **dataloader_setting)
-        eval_hook = DistEvalHook(val_dataloader, **eval_cfg)
+        eval_hook = DistEvalHook(val_dataloader, **eval_cfg) if distributed else EvalHook(val_dataloader, **eval_cfg)
         runner.register_hook(eval_hook)
 
     if cfg.get('resume_from', None):
@@ -143,7 +153,8 @@ def train_model(model,
 
     runner.run(data_loaders, cfg.workflow, cfg.total_epochs)
 
-    dist.barrier()
+    if distributed:
+        dist.barrier()
     time.sleep(2)
 
     if test['test_last'] or test['test_best']:
@@ -177,6 +188,8 @@ def train_model(model,
             shuffle=False)
         dataloader_setting = dict(dataloader_setting,
                                   **cfg.data.get('test_dataloader', {}))
+        if not distributed:
+            dataloader_setting['dist'] = False
 
         test_dataloader = build_dataloader(test_dataset, **dataloader_setting)
 
@@ -193,7 +206,10 @@ def train_model(model,
             if ckpt is not None:
                 runner.load_checkpoint(ckpt)
 
-            outputs = multi_gpu_test(runner.model, test_dataloader, tmpdir)
+            if distributed:
+                outputs = multi_gpu_test(runner.model, test_dataloader, tmpdir)
+            else:
+                outputs = single_gpu_test(runner.model, test_dataloader)
             rank, _ = get_dist_info()
             if rank == 0:
                 out = osp.join(cfg.work_dir, f'{name}_pred.pkl')
