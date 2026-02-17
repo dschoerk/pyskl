@@ -5,7 +5,8 @@
       "Bash(.venv/Scripts/python:*)",
       "Bash(.venv/Scripts/mim install:*)",
       "WebFetch(domain:download.openmmlab.com)",
-      "Bash(xargs:*)"
+      "Bash(xargs:*)",
+      "Bash(python:*)"
     ]
   }
 }

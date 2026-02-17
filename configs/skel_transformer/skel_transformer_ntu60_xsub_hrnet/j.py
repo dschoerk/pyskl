@@ -1,23 +1,27 @@
+clip_len = 16
+
 model = dict(
     type='RecognizerGCN',
     backbone=dict(
         type='SkeletonTransformer',
         graph_cfg=dict(layout='coco', mode='spatial'),
-        in_channels=3,
+        in_channels=12,
         embed_dim=64,
-        num_heads=8,
-        depth=8,
-        expand_stages=[3, 6],
+        num_heads=4,
+        depth=4,
+        expand_stages=[1, 2],
         dropout=0.1,
-        use_graph_bias=True),
-    cls_head=dict(type='GCNHead', num_classes=60, in_channels=256))
+        drop_path=0.1,
+        use_graph_bias=True,
+        use_cross_person=True),
+    cls_head=dict(type='GCNHead', num_classes=60, in_channels=4 * 64))
 
 dataset_type = 'PoseDataset'
 ann_file = 'data/nturgbd/ntu60_hrnet.pkl'
 train_pipeline = [
     dict(type='PreNormalize2D'),
-    dict(type='GenSkeFeat', dataset='coco', feats=['j']),
-    dict(type='UniformSample', clip_len=100),
+    dict(type='GenSkeFeat', dataset='coco', feats=['j', 'b', 'jm', 'bm']),
+    dict(type='UniformSample', clip_len=clip_len),
     dict(type='PoseDecode'),
     dict(type='FormatGCNInput', num_person=2),
     dict(type='Collect', keys=['keypoint', 'label'], meta_keys=[]),
@@ -25,8 +29,8 @@ train_pipeline = [
 ]
 val_pipeline = [
     dict(type='PreNormalize2D'),
-    dict(type='GenSkeFeat', dataset='coco', feats=['j']),
-    dict(type='UniformSample', clip_len=100, num_clips=1),
+    dict(type='GenSkeFeat', dataset='coco', feats=['j', 'b', 'jm', 'bm']),
+    dict(type='UniformSample', clip_len=clip_len, num_clips=1),
     dict(type='PoseDecode'),
     dict(type='FormatGCNInput', num_person=2),
     dict(type='Collect', keys=['keypoint', 'label'], meta_keys=[]),
@@ -34,8 +38,8 @@ val_pipeline = [
 ]
 test_pipeline = [
     dict(type='PreNormalize2D'),
-    dict(type='GenSkeFeat', dataset='coco', feats=['j']),
-    dict(type='UniformSample', clip_len=100, num_clips=10),
+    dict(type='GenSkeFeat', dataset='coco', feats=['j', 'b', 'jm', 'bm']),
+    dict(type='UniformSample', clip_len=clip_len, num_clips=10),
     dict(type='PoseDecode'),
     dict(type='FormatGCNInput', num_person=2),
     dict(type='Collect', keys=['keypoint', 'label'], meta_keys=[]),
@@ -55,8 +59,15 @@ data = dict(
 # optimizer - AdamW with lower lr works better for transformers
 optimizer = dict(type='AdamW', lr=1e-3, weight_decay=0.05)
 optimizer_config = dict(grad_clip=dict(max_norm=1.0))
-# learning policy
-lr_config = dict(policy='CosineAnnealing', min_lr=1e-5, by_epoch=False)
+# learning policy - linear warmup then cosine decay
+lr_config = dict(
+    policy='CosineAnnealing',
+    min_lr=1e-5,
+    by_epoch=False,
+    warmup='linear',
+    warmup_by_epoch=True,
+    warmup_iters=5,
+    warmup_ratio=1e-3)
 total_epochs = 24
 checkpoint_config = dict(interval=1)
 evaluation = dict(interval=1, metrics=['top_k_accuracy'])
