@@ -67,7 +67,7 @@ class BaseHead(nn.Module, metaclass=ABCMeta):
             label = label.unsqueeze(0)
 
         if not self.multi_class and cls_score.size() != label.size():
-            top_k_acc = top_k_accuracy(cls_score.detach().cpu().numpy(),
+            top_k_acc = top_k_accuracy(cls_score.float().detach().cpu().numpy(),
                                        label.detach().cpu().numpy(), (1, 5))
             losses['top1_acc'] = torch.tensor(
                 top_k_acc[0], device=cls_score.device)

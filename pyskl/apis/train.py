@@ -54,7 +54,8 @@ def train_model(model,
                 validate=False,
                 test=dict(test_best=False, test_last=False),
                 timestamp=None,
-                meta=None):
+                meta=None,
+                bf16=False):
     """Train model entry function.
 
     Args:
@@ -73,6 +74,18 @@ def train_model(model,
             Default: None
     """
     logger = get_root_logger(log_level=cfg.get('log_level', 'INFO'))
+
+    if bf16:
+        if not torch.cuda.is_bf16_supported():
+            raise RuntimeError('Current CUDA device does not support bfloat16')
+        logger.info('BF16 mixed precision training enabled')
+        _orig_train_step = model.train_step
+
+        def _bf16_train_step(data, optimizer, **kwargs):
+            with torch.autocast('cuda', dtype=torch.bfloat16):
+                return _orig_train_step(data, optimizer, **kwargs)
+
+        model.train_step = _bf16_train_step
 
     # prepare data loaders
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]

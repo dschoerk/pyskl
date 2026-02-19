@@ -25,6 +25,7 @@ dependencies = [
     "pycocotools",
     "mmcv==1.7.2",
     "setuptools<71",
+    "wandb",
 ]
 
 [build-system]

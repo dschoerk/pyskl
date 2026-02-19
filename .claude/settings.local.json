@@ -14,7 +14,9 @@
       "Bash(curl:*)",
       "Bash(pip install:*)",
       "WebFetch(domain:github.com)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(pip show:*)",
+      "Bash(python3:*)"
     ]
   }
 }
