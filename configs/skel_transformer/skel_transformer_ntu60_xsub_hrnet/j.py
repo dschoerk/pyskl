@@ -58,7 +58,7 @@ data = dict(
 
 # optimizer - AdamW with lower lr works better for transformers
 optimizer = dict(type='AdamW', lr=1e-3, weight_decay=0.05)
-optimizer_config = dict(grad_clip=dict(max_norm=1.0))
+optimizer_config = dict(grad_clip=dict(max_norm=2.0))
 # learning policy - linear warmup then cosine decay
 lr_config = dict(
     policy='CosineAnnealing',
