@@ -1,0 +1,1 @@
+v run tools/train.py configs/skel_transformer/skel_transformer_ntu60_xsub_hrnet/j.py --validate --compile

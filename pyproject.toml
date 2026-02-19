@@ -1,13 +1,50 @@
+[project]
+name = "pyskl"
+version = "0.1.0"
+description = "A Toolbox for skeleton-based action recognition"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache License 2.0"}
+authors = [{name = "Haodong Duan", email = "dhd.efz@gmail.com"}]
+keywords = ["computer vision", "video understanding"]
+dependencies = [
+    "torch>=1.12",
+    "torchvision",
+    "torchaudio",
+    "decord>=0.6.0",
+    "fvcore",
+    "matplotlib",
+    "moviepy",
+    "numpy>=1.23",
+    "opencv-contrib-python",
+    "openmim",
+    "pymemcache",
+    "scipy",
+    "tqdm",
+    "cython",
+    "pycocotools",
+    "mmcv==1.7.2",
+    "setuptools<71",
+    "wandb",
+]
+
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+exclude = ["configs", "tools", "demo"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu121" }]
+torchvision = [{ index = "pytorch-cu121" }]
+torchaudio = [{ index = "pytorch-cu121" }]
+
+[tool.uv.extra-build-dependencies]
+mmcv = ["setuptools<71"]
+pycocotools = ["setuptools<71"]
 
 [[tool.uv.index]]
 name = "pytorch-cu121"
 url = "https://download.pytorch.org/whl/cu121"
 explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }
-torchaudio = { index = "pytorch-cu121" }

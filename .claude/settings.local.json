@@ -6,7 +6,17 @@
       "Bash(.venv/Scripts/mim install:*)",
       "WebFetch(domain:download.openmmlab.com)",
       "Bash(xargs:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(nvcc:*)",
+      "Bash(source:*)",
+      "Bash(mim install:*)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(chmod:*)",
+      "Bash(pip show:*)",
+      "Bash(python3:*)"
     ]
   }
 }

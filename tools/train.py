@@ -50,6 +50,12 @@ def parse_args():
         help='whether to compile the model before training / testing (only available in pytorch 2.0)')
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--local-rank', type=int, default=-1)
+    parser.add_argument('--wandb', action='store_true', help='enable wandb logging')
+    parser.add_argument('--wandb-project', type=str, default='pyskl', help='wandb project name')
+    parser.add_argument('--wandb-name', type=str, default=None, help='wandb run name (defaults to work_dir basename)')
+    parser.add_argument('--wandb-tags', type=str, nargs='*', default=None, help='wandb run tags')
+    parser.add_argument('--bf16', action='store_true', help='enable bfloat16 mixed precision training')
+    parser.add_argument('--no-resume', action='store_true', help='disable auto-resume from latest checkpoint')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -84,7 +90,7 @@ def main():
         rank, world_size = 0, 1
         cfg.gpu_ids = [0]
 
-    auto_resume = cfg.get('auto_resume', True)
+    auto_resume = cfg.get('auto_resume', True) and not args.no_resume
     if auto_resume and cfg.get('resume_from', None) is None:
         resume_pth = osp.join(cfg.work_dir, 'latest.pth')
         if osp.exists(resume_pth):
@@ -123,6 +129,22 @@ def main():
     meta['config_name'] = osp.basename(args.config)
     meta['work_dir'] = osp.basename(cfg.work_dir.rstrip('/\\'))
 
+    if args.wandb:
+        run_name = args.wandb_name or osp.basename(cfg.work_dir.rstrip('/\\'))
+        wandb_hook = dict(
+            type='WandbLoggerHook',
+            init_kwargs=dict(
+                project=args.wandb_project,
+                name=run_name,
+                tags=args.wandb_tags,
+            ),
+            define_metric_cfg={'top1_acc': 'max', 'top5_acc': 'max'},
+        )
+        log_hooks = cfg.log_config.get('hooks', [])
+        if not any(h.get('type') == 'WandbLoggerHook' for h in log_hooks):
+            cfg.log_config['hooks'] = log_hooks + [wandb_hook]
+        logger.info(f'Wandb logging enabled: project={args.wandb_project}, run={run_name}')
+
     model = build_model(cfg.model)
     if dv(torch.__version__) >= dv('2.0.0') and args.compile:
         model = torch.compile(model)
@@ -159,7 +181,8 @@ def main():
     if distributed:
         dist.barrier()
 
-    train_model(model, datasets, cfg, distributed=distributed, validate=args.validate, test=test_option, timestamp=timestamp, meta=meta)
+    bf16 = args.bf16 or cfg.get('bf16', False)
+    train_model(model, datasets, cfg, distributed=distributed, validate=args.validate, test=test_option, timestamp=timestamp, meta=meta, bf16=bf16)
 
     if distributed:
         dist.barrier()
