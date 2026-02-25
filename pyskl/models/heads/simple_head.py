@@ -46,11 +46,14 @@ class SimpleHead(BaseHead):
         """Initiate the parameters from scratch."""
         normal_init(self.fc_cls, std=self.init_std)
 
-    def forward(self, x):
+    def forward(self, x, valid_person=None):
         """Defines the computation performed at every call.
 
         Args:
             x (torch.Tensor): The input data.
+            valid_person (torch.Tensor | None): Boolean mask (N, M) indicating
+                which persons are real vs zero-padded. If provided in GCN mode,
+                averages only over valid persons instead of all M.
 
         Returns:
             torch.Tensor: The classification scores for input samples.
@@ -84,9 +87,14 @@ class SimpleHead(BaseHead):
 
                 x = pool(x)
                 x = x.reshape(N, M, C)
-                x = x.mean(dim=1)
+                if valid_person is not None:
+                    # Weighted mean: only average over valid (non-padding) persons
+                    w = valid_person.float().unsqueeze(-1)  # (N, M, 1)
+                    x = (x * w).sum(dim=1) / w.sum(dim=1).clamp(min=1.0)
+                else:
+                    x = x.mean(dim=1)
 
-        assert x.shape[1] == self.in_c
+        assert x.shape[1] == self.in_c, f"Expected {self.in_c} channels, got {x.shape[1]}"
         if self.dropout is not None:
             x = self.dropout(x)
 

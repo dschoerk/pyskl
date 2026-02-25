@@ -13,11 +13,14 @@ class RecognizerGCN(BaseRecognizer):
         """Defines the computation performed at every call when training."""
         assert self.with_cls_head
         assert keypoint.shape[1] == 1
-        keypoint = keypoint[:, 0]
+        keypoint = keypoint[:, 0]  # (N, M, T, V, C)
+
+        # Detect valid (non-padding) persons from raw input
+        #valid_person = (keypoint.abs().sum(dim=(2, 3, 4)) > 0)  # (N, M)
 
         losses = dict()
-        x = self.extract_feat(keypoint)
-        cls_score = self.cls_head(x)
+        x = self.extract_feat(keypoint)  # (N, M, C, T', V)
+        cls_score = self.cls_head(x, valid_person=None) #valid_person)
         gt_label = label.squeeze(-1)
         loss = self.cls_head.loss(cls_score, gt_label)
         losses.update(loss)
@@ -30,6 +33,9 @@ class RecognizerGCN(BaseRecognizer):
         assert self.with_cls_head or self.feat_ext
         bs, nc = keypoint.shape[:2]
         keypoint = keypoint.reshape((bs * nc, ) + keypoint.shape[2:])
+
+        # Detect valid persons from raw input
+        valid_person = (keypoint.abs().sum(dim=(2, 3, 4)) > 0)  # (bs*nc, M)
 
         x = self.extract_feat(keypoint)
         feat_ext = self.test_cfg.get('feat_ext', False)
@@ -62,7 +68,7 @@ class RecognizerGCN(BaseRecognizer):
                 x = x[None]
             return x.data.cpu().numpy().astype(np.float16)
 
-        cls_score = self.cls_head(x)
+        cls_score = self.cls_head(x, valid_person=valid_person)
         cls_score = cls_score.reshape(bs, nc, cls_score.shape[-1])
         # harmless patch
         if 'average_clips' not in self.test_cfg:

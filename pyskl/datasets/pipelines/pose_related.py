@@ -153,6 +153,88 @@ class RandomScale:
 
 
 @PIPELINES.register_module()
+class RandomShear:
+    """Apply a random shear transformation to skeleton keypoints.
+
+    Each coordinate axis is shifted by a random linear combination of the
+    other axes, i.e. the full off-diagonal shear matrix is sampled per
+    sample.  The same matrix is applied to every person so that relative
+    multi-person geometry is preserved.
+
+    Args:
+        shear (float): Half-range for uniform shear sampling.  All
+            off-diagonal entries are drawn from U(-shear, shear).
+            Default: 0.1.
+    """
+
+    def __init__(self, shear=0.1):
+        self.shear = shear
+
+    def _shear_matrix_3d(self):
+        s = self.shear
+        sx = np.random.uniform(-s, s, size=2)   # [s_xy, s_xz]
+        sy = np.random.uniform(-s, s, size=2)   # [s_yx, s_yz]
+        sz = np.random.uniform(-s, s, size=2)   # [s_zx, s_zy]
+        return np.array([[1,     sx[0], sx[1]],
+                         [sy[0], 1,     sy[1]],
+                         [sz[0], sz[1], 1    ]], dtype=np.float32)
+
+    def _shear_matrix_2d(self):
+        s = self.shear
+        sx = np.random.uniform(-s, s)
+        sy = np.random.uniform(-s, s)
+        return np.array([[1,  sx],
+                         [sy, 1 ]], dtype=np.float32)
+
+    def __call__(self, results):
+        skeleton = results['keypoint']
+        C = skeleton.shape[-1]
+        assert C in [2, 3]
+
+        if np.all(np.isclose(skeleton, 0)):
+            return results
+
+        shear_mat = self._shear_matrix_3d() if C == 3 else self._shear_matrix_2d()
+        results['keypoint'] = np.einsum('ab,mtvb->mtva', shear_mat, skeleton)
+        return results
+
+
+@PIPELINES.register_module()
+class RandomDropout:
+    """Randomly zero out individual joints.
+
+    Each joint is independently set to zero with probability ``p``.  When
+    ``shared=True`` the same mask is applied to every frame; otherwise a fresh
+    mask is drawn per frame.
+
+    Args:
+        p (float): Per-joint drop probability. Default: 0.2.
+        shared (bool): Whether to use the same mask for all frames.
+            Default: False.
+    """
+
+    def __init__(self, p=0.2, shared=False):
+        assert 0. <= p < 1., f'p must be in [0, 1), got {p}'
+        self.p = p
+        self.shared = shared
+
+    def __call__(self, results):
+        skeleton = results['keypoint']
+        M, T, V, C = skeleton.shape
+
+        if self.shared:
+            # Same joint mask for every frame and person
+            mask = np.random.random(V) >= self.p          # (V,)
+            results['keypoint'] = skeleton * mask[None, None, :, None]
+        else:
+            # Independent mask per person and frame
+            mask = np.random.random((M, T, V)) >= self.p  # (M, T, V)
+            results['keypoint'] = skeleton * mask[..., None]
+
+        return results
+
+
+@PIPELINES.register_module()
 class RandomGaussianNoise:
 
     def __init__(self, sigma=0.01, base='frame', shared=False):

@@ -28,13 +28,15 @@ class CrossEntropyLoss(BaseWeightedLoss):
             as None, use the same weight 1 for all classes. Only applies
             to CrossEntropyLoss and BCELossWithLogits (should not be set when
             using other losses). Default: None.
+        label_smoothing (float): Label smoothing factor. Default: 0.0.
     """
 
-    def __init__(self, loss_weight=1.0, class_weight=None):
+    def __init__(self, loss_weight=1.0, class_weight=None, label_smoothing=0.0):
         super().__init__(loss_weight=loss_weight)
         self.class_weight = None
         if class_weight is not None:
             self.class_weight = torch.Tensor(class_weight)
+        self.label_smoothing = label_smoothing
 
     def _forward(self, cls_score, label, **kwargs):
         """Forward function.
@@ -77,7 +79,9 @@ class CrossEntropyLoss(BaseWeightedLoss):
                 assert 'weight' not in kwargs, \
                     "The key 'weight' already exists."
                 kwargs['weight'] = self.class_weight.to(cls_score.device)
-            loss_cls = F.cross_entropy(cls_score, label, **kwargs)
+            loss_cls = F.cross_entropy(
+                cls_score, label,
+                label_smoothing=self.label_smoothing, **kwargs)
 
         return loss_cls
 

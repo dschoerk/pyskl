@@ -16,7 +16,10 @@
       "WebFetch(domain:github.com)",
       "Bash(chmod:*)",
       "Bash(pip show:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(taskkill:*)",
+      "Bash(pkill:*)",
+      "Bash(ls:*)"
     ]
   }
 }
