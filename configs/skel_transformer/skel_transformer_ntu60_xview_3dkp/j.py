@@ -88,4 +88,4 @@ log_config = dict(interval=100, hooks=[dict(type='TextLoggerHook')])
 
 log_level = 'INFO'
 work_dir = './work_dirs/skel_transformer/skel_transformer_ntu60_xview_3dkp/j'
-load_from = 'work_dirs/skel_transformer_mae/pretrain/latest.pth'
+#load_from = 'work_dirs/skel_transformer_mae/pretrain/latest.pth'
