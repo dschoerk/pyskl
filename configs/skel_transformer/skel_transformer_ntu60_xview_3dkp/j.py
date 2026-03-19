@@ -1,4 +1,4 @@
-clip_len = 32
+clip_len = 100
 
 model = dict(
     type='RecognizerGCN',
@@ -6,7 +6,7 @@ model = dict(
         type='SkeletonTransformer',
         graph_cfg=dict(layout='nturgb+d', mode='spatial'),
         in_channels=3,
-        temporal_patch_size=4,
+        temporal_patch_size=1,
         embed_dim=64,
         head_dim=16,  # num_heads = dim // head_dim, scales with channel expansion (4->8->16)
         depth=8,
@@ -88,4 +88,4 @@ log_config = dict(interval=100, hooks=[dict(type='TextLoggerHook')])
 
 log_level = 'INFO'
 work_dir = './work_dirs/skel_transformer/skel_transformer_ntu60_xview_3dkp/j'
-#load_from = 'work_dirs/skel_transformer_mae/pretrain/latest.pth'
+load_from = 'work_dirs/skel_transformer_mae/pretrain/latest.pth'
