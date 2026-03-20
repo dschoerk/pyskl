@@ -85,7 +85,7 @@ def inference_pytorch(args, cfg, data_loader):
     # build the model and load checkpoint
     model = build_model(cfg.model)
     if dv(torch.__version__) >= dv('2.0.0') and args.compile:
-        model = torch.compile(model)
+        model.backbone.compile_blocks()
 
     if args.checkpoint is None:
         work_dir = cfg.work_dir

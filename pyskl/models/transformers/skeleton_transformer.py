@@ -59,6 +59,7 @@ class SkeletonTransformer(nn.Module):
                  drop_path=0.1,
                  use_graph_bias=True,
                  use_cross_person=True,
+                 split_factor=None,
                  pretrained=None):
         super().__init__()
         self.pretrained = pretrained
@@ -106,11 +107,21 @@ class SkeletonTransformer(nn.Module):
                     A=A,
                     use_cross_person=use_cross_person,
                     downsample=(i in down_set),
+                    split_factor=split_factor,
+                    near=(i % 2 == 0),
                 ))
             cur_dim = out_dim
 
         self.out_dim = cur_dim
         self.final_norm = nn.LayerNorm(cur_dim)
+
+    def compile_blocks(self):
+        """Mark blocks for compilation after weights are loaded.
+
+        Actual compilation is deferred to the first forward pass so that
+        pretrained weight loading sees the original (uncompiled) state dict keys.
+        """
+        self._pending_compile = True
 
     def init_weights(self):
         if isinstance(self.pretrained, str):
@@ -118,6 +129,14 @@ class SkeletonTransformer(nn.Module):
             load_checkpoint(self, self.pretrained, strict=False)
 
     def forward(self, x, mask=None, mask_token=None):
+        if getattr(self, '_pending_compile', False):
+            import logging
+            logger = logging.getLogger(__name__)
+            for i, block in enumerate(self.blocks):
+                self.blocks[i] = torch.compile(block, dynamic=False)
+                logger.info(f'Compiled block {i}')
+            self._pending_compile = False
+
         # x: (N, M, T, V, C) from dataloader
         N, M, T, V, C = x.shape
 
