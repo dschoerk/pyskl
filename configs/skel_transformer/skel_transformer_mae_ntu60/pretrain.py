@@ -6,25 +6,27 @@ model = dict(
         type='SkeletonTransformer',
         graph_cfg=dict(layout='nturgb+d', mode='spatial'),
         in_channels=3,
+        temporal_patch_size=1,
         embed_dim=64,
         head_dim=16,
         depth=8,
-        # Same temporal pyramid as supervised — all weights transfer exactly
-        # T=32,D=64 -> [pool] T=16,D=128 -> [pool] T=8,D=256 -> [pool] T=4
-        down_stages=[2, 4, 6],
+        # Isotropic encoder for MAE: no pyramid, full temporal resolution
+        # Early block weights transfer to fine-tuning; pyramid layers init fresh
+        down_stages=[],
         expand_stages=[2, 4],
         dropout=0.1,
         drop_path=0.15,
         use_graph_bias=True,
-        use_cross_person=False),
+        use_cross_person=False,
+        split_factor=10),
     decoder_head=dict(
         type='MAEHead',
-        encoder_dim=256,     # backbone output dim after 2x expansion
+        encoder_dim=256,      # isotropic encoder, no channel expansion
         decoder_dim=128,
         decoder_depth=2,
         decoder_heads=4,
         in_channels=3,
-        target_T=clip_len,   # upsample from T=4 back to T=32
+        target_T=clip_len,   # no upsampling needed, encoder keeps T=32
         use_graph_bias=True,
         graph_cfg=dict(layout='nturgb+d', mode='spatial')),
     mask_ratio=0.75,
@@ -60,7 +62,7 @@ paramwise_cfg = dict(custom_keys={
 
 # optimizer
 optimizer = dict(type='AdamW', lr=1.5e-3, weight_decay=0.05, paramwise_cfg=paramwise_cfg)
-optimizer_config = dict(grad_clip=dict(max_norm=1.0))
+optimizer_config = dict(grad_clip=dict(max_norm=0.5))
 # learning policy
 lr_config = dict(
     policy='CosineAnnealing',

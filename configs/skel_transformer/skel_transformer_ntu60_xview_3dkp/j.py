@@ -17,7 +17,8 @@ model = dict(
         dropout=0.1,
         drop_path=0.15,
         use_graph_bias=True,
-        use_cross_person=False),
+        use_cross_person=False,
+        split_factor=10),
     cls_head=dict(type='GCNHead', num_classes=60, in_channels=256,
                   loss_cls=dict(type='CrossEntropyLoss', loss_weight=1.0, label_smoothing=0.1)))
 

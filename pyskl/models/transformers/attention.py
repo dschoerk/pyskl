@@ -256,17 +256,22 @@ class JointSpatioTemporalBlock(nn.Module):
 
     def __init__(self, embed_dim, num_heads, max_T=300,
                  dropout=0.0, drop_path=0.0,
-                 use_graph_bias=False, A=None):
+                 use_graph_bias=False, A=None,
+                 split_factor=None, near=True):
         super().__init__()
         assert embed_dim % num_heads == 0
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.max_T = max_T
         self.dropout = dropout
+        self.split_factor = split_factor
+        self.near = near
 
         self.norm1 = nn.LayerNorm(embed_dim)
         self.qkv = nn.Linear(embed_dim, 3 * embed_dim)
         self.proj = nn.Linear(embed_dim, embed_dim)
+        self.logit_scale = nn.Parameter(
+            torch.ones(num_heads, 1, 1) * math.log(math.sqrt(embed_dim // num_heads)))
 
         self.norm2 = nn.LayerNorm(embed_dim)
         self.ffn = nn.Sequential(
@@ -286,7 +291,6 @@ class JointSpatioTemporalBlock(nn.Module):
         temporal_init = temporal_init.clamp(min=-10.0)
         self.rel_pos_bias = nn.Parameter(
             temporal_init.unsqueeze(0).expand(num_heads, -1).clone())
-        
 
         # Spatial graph bias
         self.use_graph_bias = use_graph_bias
@@ -326,28 +330,113 @@ class JointSpatioTemporalBlock(nn.Module):
         bias = bias.reshape(self.num_heads, T * V, T * V)
         return bias.unsqueeze(0).to(dtype)  # (1, h, T*V, T*V)
 
+    def _build_split_bias(self, Tk, V, stride, dtype):
+        """Build (1, h, Tk*V, Tk*V) attention bias for split attention.
+
+        Args:
+            Tk: number of attended temporal positions (the kept axis).
+            V: number of joints.
+            stride: real frame distance between consecutive attended frames.
+                    1 for near (consecutive), T2 for far (strided).
+            dtype: output dtype.
+        """
+        # Temporal: relative offsets in real frame units are 0, ±stride, ±2*stride, ...
+        t_coords = torch.arange(Tk, device=self.rel_pos_bias.device)
+        t_rel = (t_coords.unsqueeze(1) - t_coords.unsqueeze(0)) * stride  # (Tk, Tk)
+        t_rel = t_rel + self.max_T - 1  # shift to index into bias table
+        t_bias = self.rel_pos_bias[:, t_rel]  # (h, Tk, Tk)
+        t_bias = t_bias[:, :, None, :, None].expand(-1, -1, V, -1, V)  # (h, Tk, V, Tk, V)
+
+        bias = t_bias
+
+        if self.use_graph_bias:
+            s_bias = self.graph_bias[:, :V, :V]  # (h, V, V)
+            s_bias = s_bias[:, None, :, None, :].expand(-1, Tk, -1, Tk, -1)
+            bias = bias + s_bias
+
+        bias = bias.reshape(self.num_heads, Tk * V, Tk * V)
+        return bias.unsqueeze(0).to(dtype)  # (1, h, Tk*V, Tk*V)
+
     def forward(self, x):
         B, T, V, D = x.shape
         h, d = self.num_heads, self.head_dim
-        L = T * V
-        x_flat = x.reshape(B, L, D)
+        sf = self.split_factor
 
-        # Pre-norm + MHSA
+        # Find the largest divisor of T that is <= split_factor
+        T1 = None
+        if sf is not None and T > sf:
+            for f in range(sf, 1, -1):
+                if T % f == 0:
+                    T1 = f
+                    break
+
+        # Pre-norm
+        x_flat = x.reshape(B, T * V, D)
         residual = x_flat
         x_flat = self.norm1(x_flat)
 
-        qkv = self.qkv(x_flat).reshape(B, L, 3, h, d).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)  # each (B, h, L, d)
+        if T1 is not None:
+            T2 = T // T1
 
-        attn_bias = self._build_bias(T, V, q.dtype)  # (1, h, L, L)
+            if self.near:
+                # Near: merge T1 into batch, attend over T2*V consecutive tokens
+                # (B, T1, T2, V, D) -> (B*T1, T2*V, D)
+                x_split = x_flat.reshape(B, T1, T2, V, D).reshape(B * T1, T2 * V, D)
+                Tk, stride = T2, 1
+            else:
+                # Far: merge T2 into batch, attend over T1*V strided tokens
+                # (B, T1, T2, V, D) -> (B, T1, T2, V, D)
+                #   -> permute to (B, T2, T1, V, D) -> (B*T2, T1*V, D)
+                x_split = (x_flat.reshape(B, T1, T2, V, D)
+                           .permute(0, 2, 1, 3, 4)
+                           .reshape(B * T2, T1 * V, D))
+                Tk, stride = T1, T2
 
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_bias,
-            dropout_p=self.dropout if self.training else 0.0,
-        )  # (B, h, L, d)
-        out = out.permute(0, 2, 1, 3).reshape(B, L, D)
-        out = self.proj(out)
+            Bb = x_split.shape[0]  # B*T1 or B*T2
+            L = Tk * V
+
+            qkv = self.qkv(x_split).reshape(Bb, L, 3, h, d).permute(2, 0, 3, 1, 4)
+            q, k, v = qkv.unbind(0)  # each (Bb, h, L, d)
+
+            scale = self.logit_scale.clamp(max=math.log(100)).exp()
+            q = F.normalize(q, dim=-1) * scale
+            k = F.normalize(k, dim=-1)
+
+            attn_bias = self._build_split_bias(Tk, V, stride, q.dtype)
+
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_bias,
+                dropout_p=self.dropout if self.training else 0.0,
+            )  # (Bb, h, L, d)
+            out = out.permute(0, 2, 1, 3).reshape(Bb, L, D)
+            out = self.proj(out)
+
+            # Restore to (B, T*V, D)
+            if self.near:
+                out = out.reshape(B, T1, T2, V, D).reshape(B, T * V, D)
+            else:
+                out = (out.reshape(B, T2, T1, V, D)
+                       .permute(0, 2, 1, 3, 4)
+                       .reshape(B, T * V, D))
+        else:
+            # Full attention fallback
+            qkv = self.qkv(x_flat).reshape(B, T * V, 3, h, d).permute(2, 0, 3, 1, 4)
+            q, k, v = qkv.unbind(0)
+
+            scale = self.logit_scale.clamp(max=math.log(100)).exp()
+            q = F.normalize(q, dim=-1) * scale
+            k = F.normalize(k, dim=-1)
+
+            attn_bias = self._build_bias(T, V, q.dtype)
+
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_bias,
+                dropout_p=self.dropout if self.training else 0.0,
+            )
+            out = out.permute(0, 2, 1, 3).reshape(B, T * V, D)
+            out = self.proj(out)
 
         x_flat = residual + self.drop_path(out)
 
@@ -394,14 +483,15 @@ class JointTransformerBlock(nn.Module):
                  dropout=0.0, drop_path=0.0,
                  use_graph_bias=False, A=None,
                  use_cross_person=True,
-                 downsample=False):
+                 downsample=False,
+                 split_factor=None, near=True):
         super().__init__()
         self.use_cross_person = use_cross_person
         self.downsample = downsample
 
         self.st_attn = JointSpatioTemporalBlock(
             in_dim, num_heads, max_T, dropout, drop_path,
-            use_graph_bias, A=A)
+            use_graph_bias, A=A, split_factor=split_factor, near=near)
 
         if use_cross_person and num_person > 1:
             self.cross_person_attn = CrossPersonAttentionBlock(
